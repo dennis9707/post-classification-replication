@@ -1,43 +1,25 @@
 import torch
 from torch import nn
-from transformers import LongformerForSequenceClassification
+from transformers import RobertaForSequenceClassification
 from transformers import Trainer, TrainingArguments
-from utils import compute_metrics
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
+from sklearn.utils.class_weight import compute_class_weight
 import argparse
 import numpy as np
 import pandas as pd
+from transformers import AutoConfig, AutoModelForSequenceClassification
+
 WEIGHT = None
 
 weight_setting = {
-    'api-change': [ 0.52576236, 10.20408163],
-    'api-usage': [0.81699346, 1.28865979],
-    'concep': [0.68306011, 1.86567164],
-    'discrep': [0.72780204, 1.59744409],
-    'docs': [0.51975052, 13.15789474],
-    'errors': [0.64516129, 2.22222222],
-    'review': [0.60386473, 2.90697674],
+    'api-change': [0.53191489, 8.33333333],
+    'api-usage': [0.85034014, 1.21359223],
+    'concep': [0.70422535, 1.72413793],
+    'discrep': [0.67385445,1.9379845 ],
+    'docs': [0.53191489, 8.33333333],
+    'errors': [0.61425061, 2.68817204],
+    'review': [0.59382423, 3.16455696],
 }
-
-class FocalLoss(nn.Module):
-    def __init__(self, alpha=1, gamma=2, logits=False, reduce=True):
-        super(FocalLoss, self).__init__()
-        self.alpha = alpha
-        self.gamma = gamma
-        self.logits = logits
-        self.reduce = reduce
-
-    def forward(self, inputs, targets):
-        if self.logits:
-            BCE_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduce=False)
-        else:
-            BCE_loss = F.binary_cross_entropy(inputs, targets, reduce=False)
-        pt = torch.exp(-BCE_loss)
-        F_loss = self.alpha * (1-pt)**self.gamma * BCE_loss
-
-        if self.reduce:
-            return torch.mean(F_loss)
-        else:
-            return F_loss
 
 
 
@@ -52,6 +34,20 @@ class CustomTrainer(Trainer,):
         loss = loss_fct(logits.view(-1, self.model.config.num_labels), labels.view(-1))
         return (loss, outputs) if return_outputs else loss
 
+def compute_metrics(pred):
+    labels = pred.label_ids
+    preds = pred.predictions.argmax(-1)
+    weighted_precision = precision_score(labels, preds, average="weighted")
+    binary_precision = precision_score(labels, preds, average="binary")
+    weighted_recall = recall_score(labels, preds, average="weighted")
+    binary_recall = recall_score(labels, preds, average="binary")
+    weighted_f1 = f1_score(labels, preds, average="weighted")
+    binary_f1 = f1_score(labels, preds, average="binary")
+    acc = accuracy_score(labels, preds)
+    auc = roc_auc_score(labels, preds)
+    return {"accuracy": acc, "weighted-precision": weighted_precision, "binary-precision": binary_precision,
+            "weighted-recall": weighted_recall, "binary-recall": binary_recall,
+            "weighted-f1": weighted_f1, "binary-f1": binary_f1, "auc":auc}
 
 def train():
     parser = argparse.ArgumentParser()
@@ -66,13 +62,17 @@ def train():
     args = parser.parse_args()
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = LongformerForSequenceClassification.from_pretrained("allenai/longformer-base-4096", num_labels=2).to(device)
+
+    # Download configuration from huggingface.co and cache.
+    config = AutoConfig.from_pretrained("microsoft/codebert-base")
+    model = AutoModelForSequenceClassification.from_config(config).to(device)
     batch_size = 2
     # load dataset
     train = torch.load(args.train_data)
     test = torch.load(args.test_data)
     global WEIGHT
     WEIGHT = weight_setting[args.name]
+    print("codebert")
     print(args.name)
     print(WEIGHT)
     
@@ -80,8 +80,8 @@ def train():
                                 columns=["label", "input_ids", "attention_mask"])
     logging_steps = len(train["train"]) // batch_size
     training_args = TrainingArguments(output_dir=args.save_folder,
-                                    num_train_epochs=3,
-                                    learning_rate=2e-5,
+                                    num_train_epochs=5,
+                                    learning_rate=5e-5,
                                     per_device_train_batch_size=batch_size,
                                     per_device_eval_batch_size=batch_size,
                                     gradient_accumulation_steps=16,
@@ -96,10 +96,7 @@ def train():
                     compute_metrics=compute_metrics,
                     train_dataset=train['train'],
                     eval_dataset=test['train'])
-    trainer.hyperparameter_search(
-    direction="maximize", 
-    backend="ray", 
-    n_trials=10)
+    trainer.train()
 
 if __name__ == '__main__':
     train()

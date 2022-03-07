@@ -35,12 +35,17 @@ class CustomTrainer(Trainer,):
 def compute_metrics(pred):
     labels = pred.label_ids
     preds = pred.predictions.argmax(-1)
-    precision = precision_score(labels, preds, average="weighted")
-    recall = recall_score(labels, preds, average="weighted")
-    f1 = f1_score(labels, preds, average="weighted")
+    weighted_precision = precision_score(labels, preds, average="weighted")
+    binary_precision = precision_score(labels, preds, average="binary")
+    weighted_recall = recall_score(labels, preds, average="weighted")
+    binary_recall = recall_score(labels, preds, average="binary")
+    weighted_f1 = f1_score(labels, preds, average="weighted")
+    binary_f1 = f1_score(labels, preds, average="binary")
     acc = accuracy_score(labels, preds)
     auc = roc_auc_score(labels, preds)
-    return {"accuracy": acc, "precision": precision, "recall": recall,"f1": f1, "auc":auc}
+    return {"accuracy": acc, "weighted-precision": weighted_precision, "binary-precision": binary_precision,
+            "weighted-recall": weighted_recall, "binary-recall": binary_recall,
+            "weighted-f1": weighted_f1, "binary-f1": binary_f1, "auc":auc}
 
 def train():
     parser = argparse.ArgumentParser()
@@ -62,6 +67,7 @@ def train():
     test = torch.load(args.test_data)
     global WEIGHT
     WEIGHT = weight_setting[args.name]
+    print("roberta-base")
     print(args.name)
     print(WEIGHT)
     
