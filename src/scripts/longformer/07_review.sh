@@ -1,4 +1,4 @@
-CUDA_VISIBLE_DEVICES=1 python -u train_lf_classification.py \
+CUDA_VISIBLE_DEVICES=6 python -u train_lf_classification.py \
     --name review \
     --train_data ../data/train/review \
     --test_data ../data/test/review \

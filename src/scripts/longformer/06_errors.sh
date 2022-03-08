@@ -1,4 +1,4 @@
-CUDA_VISIBLE_DEVICES=0 python -u train_lf_classification.py \
+CUDA_VISIBLE_DEVICES=5 python -u train_lf_classification.py \
     --name errors \
     --train_data ../data/train/errors \
     --test_data ../data/test/errors \

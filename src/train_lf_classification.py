@@ -6,6 +6,8 @@ from utils import compute_metrics
 import argparse
 import numpy as np
 import pandas as pd
+from ray.tune.suggest.hyperopt import HyperOptSearch
+from ray.tune.schedulers import ASHAScheduler
 WEIGHT = None
 
 weight_setting = {
@@ -52,6 +54,24 @@ class CustomTrainer(Trainer,):
         loss = loss_fct(logits.view(-1, self.model.config.num_labels), labels.view(-1))
         return (loss, outputs) if return_outputs else loss
 
+def model_init():
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    return LongformerForSequenceClassification.from_pretrained("allenai/longformer-base-4096", num_labels=2).to(device)
+
+def my_hp_space(trial):
+    from ray import tune
+
+    return {
+        "learning_rate": tune.loguniform(3e-5, 7e-5),
+        "num_train_epochs": tune.choice(range(3, 6)),
+        "seed": tune.choice(range(1, 41)),
+        "per_device_train_batch_size": tune.choice([2,]),
+        "per_device_eval_batch_size": tune.choice([8,]),
+        "gradient_accumulation_steps": tune.choice([16, 32,]),
+        # "fp16": tune.choice([True, ]),
+        # "fp16_opt_level": tune.choice(['01', '02']),
+    }
+
 
 def train():
     parser = argparse.ArgumentParser()
@@ -66,7 +86,7 @@ def train():
     args = parser.parse_args()
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = LongformerForSequenceClassification.from_pretrained("allenai/longformer-base-4096", num_labels=2).to(device)
+    
     batch_size = 2
     # load dataset
     train = torch.load(args.train_data)
@@ -78,28 +98,37 @@ def train():
     
     train.set_format("torch",
                                 columns=["label", "input_ids", "attention_mask"])
-    logging_steps = len(train["train"]) // batch_size
+    # logging_steps = len(train["train"]) // batch_size
     training_args = TrainingArguments(output_dir=args.save_folder,
-                                    num_train_epochs=3,
-                                    learning_rate=2e-5,
-                                    per_device_train_batch_size=batch_size,
-                                    per_device_eval_batch_size=batch_size,
-                                    gradient_accumulation_steps=16,
-                                    weight_decay=0.0001,
+                                    # num_train_epochs=3,
+                                    # learning_rate=2e-5,
+                                    # per_device_train_batch_size=batch_size,
+                                    # per_device_eval_batch_size=batch_size,
+                                    # gradient_accumulation_steps=16,
+                                    # weight_decay=0.0001,
+                                    fp16 = True,
+                                    fp16_opt_level = '01',
                                     evaluation_strategy="epoch",
                                     disable_tqdm=False,
-                                    logging_steps=logging_steps,
-                                    push_to_hub=False,
+                                    # logging_steps=logging_steps,
                                     log_level="error")
 
-    trainer = CustomTrainer(model=model, args=training_args,
+    trainer = CustomTrainer(args=training_args,
                     compute_metrics=compute_metrics,
                     train_dataset=train['train'],
-                    eval_dataset=test['train'])
+                    eval_dataset=test['train'],
+                    model_init=model_init, )
     trainer.hyperparameter_search(
-    direction="maximize", 
+    direction="maximize",
+    hp_space=my_hp_space,
     backend="ray", 
-    n_trials=10)
+    n_trials=10,
+    # Choose among many libraries:
+    # https://docs.ray.io/en/latest/tune/api_docs/suggestion.html
+    search_alg=HyperOptSearch(metric="objective", mode="max"),
+    # Choose among schedulers:
+    # https://docs.ray.io/en/latest/tune/api_docs/schedulers.html
+    scheduler=ASHAScheduler(metric="objective", mode="max"))
 
 if __name__ == '__main__':
     train()
